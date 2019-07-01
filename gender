@@ -1,0 +1,106 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r packages}
+library(caret)
+library(tidyverse)
+library(e1071)
+library(gender)
+library(stringr)
+library(mlr)
+library(tidytext)
+```
+
+```{r}
+Ext_names <- read_csv(here::here("data/Ext_names.csv"))
+names(Ext_names)
+glimpse(Ext_names)
+```
+
+```{r}
+#Removing duplicates from the dataset
+Clean_names <- Ext_names %>%
+  mutate(Names = tolower(Names), Gender = tolower(Gender)) %>%
+  unique()
+Clean_names
+```
+
+
+```{r}
+#Assigning probabilities for each gender: Male, Female or both
+gender_prob <- Clean_names %>%
+  group_by(Names) %>%
+  summarize(gen = paste0(Gender, collapse = ',')
+            ) %>%
+  ungroup() %>%
+  mutate(prob_of_f = case_when(str_detect(gen, 'f') & !str_detect(gen, 'm') == 1 ~ 1, 
+            str_detect(gen, 'm') & !str_detect(gen, 'f')  == 1 ~ 0,
+            str_detect(gen, 'm') & str_detect(gen, 'f') == 1 ~ 0.5,
+            ) ) %>%
+    mutate(gen = ifelse(prob_of_f == 0.5, 'both', gen))
+gender_prob
+```
+
+```{r}
+#Tokenising names: Splitting into different features that can be used for training
+tokenised_names <- gender_prob %>%
+  mutate(padded_names = paste0("..", Names, "..")) %>%
+  unnest_tokens(tokens, padded_names, token = "character_shingles", n = 3, strip_non_alphanum = F)
+tokenised_names
+```
+
+```{r}
+#spreading token
+spread_names <- tokenised_names %>%
+  distinct() %>%
+  select(Names, gen, prob_of_f, tokens) %>%
+  spread(key = tokens, value = prob_of_f)
+spread_names
+```
+  
+```{r}
+#creating index for each of the names to be used in the training dataset
+unique_names <- spread_names %>%
+  select(Names) %>%
+  mutate(index = sample(2,length(unique(.$Names)), prob = c(0.7, 0.3), replace = T))
+unique_names
+ spread_names <- unique_names %>%
+  left_join(spread_names, by = "Names") #merging 2 datasets
+ ytrain <- filter(spread_names, index == 1)
+ ytest <- filter(spread_names, index == 2)
+```
+```{r}
+ytest[,2] <- as.character(ytest[,2])
+ytest
+```
+
+```{r}
+#Fitting the naive bayes model to predict probabilities
+naive_classifier <- naiveBayes(tokens~ ., spread_names)
+naive_classifier
+```
+
+
+```{r}
+#predicting the probabilities of male or female in the dataset, raw == conditional probabilities
+predicting <- predict(naive_classifier, ytest, type = "raw") 
+predicting
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
